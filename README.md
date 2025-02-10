@@ -15,16 +15,17 @@ be able to remap on layers higher in the abstraction (e.g. apps).
 2. user@computer $: `adb shell`
 3. user@samsung $: `su`
 4. root@samsung #: `cp /sdcard/map_bixby_to_power.sh /data/adb/service.d/`
+5. root@samsung #: `chmod +x /data/adb/service.d/map_bixby_to_power.sh`
 
 ## How it works
 The script creates a [named pipe](https://en.wikipedia.org/wiki/Named_pipe) in memory, and
 executes [`getevent`](https://source.android.com/docs/core/interaction/input/getevent) on the
-special file that represents physical buttons in the background, redirecting its output
-to the pipe. This is a non-blocking allows and the script to continue into an infinite loop.
+special file that represents physical buttons, redirecting its output
+to the pipe. This happens in the background in a non-blocking way, and allows the script to continue into an infinite loop.
 
 Inside it, each second, the pipe is queried for new events and performs the necessary logic for
 waking/sleeping the screen. This implementation works for daily use, however, some edge cases
 like holding Bixby break the event grabbing logic. Also, I honestly don't know if doing IPC
 this way - attempting to get a new event each second is good for battery/performance.
 
-TL,DR: I mean, it has room for improvement, but works.
+TL,DR: I mean, it has room for improvement, but it works.

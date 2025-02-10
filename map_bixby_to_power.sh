@@ -1,45 +1,70 @@
 #!/bin/sh
 
-# Create a named pipe
+log_file="/tmp/getevent_debug.log"
+
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$log_file"
+}
+
 pipe="/tmp/getevent_pipe"
 if [ ! -p "$pipe" ]; then
-  mkfifo "$pipe"
+    mkfifo "$pipe"
+    log_msg "Created named pipe: $pipe"
+else
+    log_msg "Named pipe already exists: $pipe"
 fi
 
-# On my Samsung device, the "gpio_keys" device
-# is at this special file. Redirect its events
-# to the pipe and detach from it (non blocking).
-getevent -l /dev/input/event1 > "$pipe" &
+restart_getevent() {
+    log_msg "Restarting getevent..."
+    killall getevent 2>/dev/null
+    getevent -l /dev/input/event1 > "$pipe" &
+    getevent_pid=$!
+    log_msg "getevent restarted with PID $getevent_pid"
+}
 
-# Define a cleanup function to capture and handle
-# common termination signals
-getevent_pid=$! # the PID of the most recent background command (getevent)
+log_msg "Starting getevent on /dev/input/event1"
+getevent -l /dev/input/event1 > "$pipe" &
+getevent_pid=$!
+log_msg "getevent started with PID $getevent_pid"
+
 cleanup() {
+    log_msg "Cleanup triggered. Stopping getevent (PID $getevent_pid)..."
     kill "$getevent_pid" 2>/dev/null
     rm -f "$pipe"
+    log_msg "Pipe removed. Exiting script."
     exit 0
 }
 trap "cleanup" EXIT SIGINT SIGTERM
 
-# Initially the Bixby button (code 02bf on my device) isn't pressed
 press_detected=false
+last_event_time=$(date +%s)
+
+log_msg "Event monitoring loop started."
+
 while true; do
-    # Reads a single line from the pipe's stdout into the "event"variable.
-    # If no data is available with one second, do nothing, and the loop continues.
+    # Check if getevent has died
+    if ! kill -0 "$getevent_pid" 2>/dev/null; then
+        log_msg "getevent process $getevent_pid is NOT running! Restarting..."
+        restart_getevent
+        last_event_time=$(date +%s)
+    fi
+
     if read -t 1 event < "$pipe"; then
-        # Check the button's "DOWN" event
+        log_msg "Event received: $event"
+        last_event_time=$(date +%s)
+
         if echo "$event" | grep -q "EV_KEY.*02bf.*DOWN"; then
             press_detected=true
+            log_msg "Bixby button DOWN detected."
         fi
 
-        # When the "UP" event is detected, the keypress is done and we can lock the screen
         if echo "$event" | grep -q "EV_KEY.*02bf.*UP"; then
             if $press_detected; then
-                # Apparently, this keyevent triggers the same action as single pressing the power button (waking or putting the screen to sleep)
+                log_msg "Bixby button UP detected. Sending keyevent 26..."
                 input keyevent 26
                 press_detected=false
+                log_msg "Screen lock triggered."
             fi
         fi
     fi
 done
-
