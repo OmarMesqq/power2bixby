@@ -6,33 +6,27 @@ if [ ! -p "$pipe" ]; then
   mkfifo "$pipe"
 fi
 
-# On my Samsung device, the "gpio_keys" device
-# is at this special file. Redirect its events
-# to the pipe and detach from it (non blocking).
+# getevent should listen on the "gpio_keys" device file
 getevent -l /dev/input/event1 > "$pipe" &
-
-# Define a cleanup function to capture and handle common termination signals
 getevent_pid=$! # the PID of the most recent background command 
+
 cleanup() {
-    kill "$getevent_pid" 2>/dev/null
-    rm -f "$pipe"
+    kill "$getevent_pid" 
+    rm "$pipe"
     exit 0
 }
 trap "cleanup" EXIT SIGINT SIGTERM
 
-# Function to restart the getevent background process
 restart_getevent() {
-    killall getevent 2>/dev/null
+    kill "$getevent_pid"
     getevent -l /dev/input/event1 > "$pipe" &
     getevent_pid=$!
 }
 
-
-# Initially the Bixby button (code 02bf on my device) isn't pressed
-press_detected=false
+bixby_pressed=false
 while true; do
     # Check if getevent was killed, and restart it appropriately
-    if ! kill -0 "$getevent_pid" 2>/dev/null; then
+    if ! kill -0 "$getevent_pid"; then
         restart_getevent
     fi
 
@@ -41,14 +35,14 @@ while true; do
     if read -t 1 event < "$pipe"; then
         # Check the button's "DOWN" event
         if echo "$event" | grep -q "EV_KEY.*02bf.*DOWN"; then
-            press_detected=true
+            bixby_pressed=true
         fi
         # When the "UP" event is detected, the keypress is done and we can lock the screen
         if echo "$event" | grep -q "EV_KEY.*02bf.*UP"; then
-            if $press_detected; then
+            if $bixby_pressed; then
                 # Apparently, this keyevent triggers the same action as single pressing the power button (waking or putting the screen to sleep)
                 input keyevent 26
-                press_detected=false
+                bixby_pressed=false
             fi
         fi
     fi
